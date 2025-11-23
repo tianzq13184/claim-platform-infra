@@ -29,32 +29,33 @@ func TestInfrastructure(t *testing.T) {
 		},
 	}
 
+	// Cleanup resources after all tests complete
+	defer terraform.Destroy(t, tfOptions)
+
 	// Step 1: Terraform Init and Plan (check for destructive changes)
 	t.Run("PlanCheck", func(t *testing.T) {
 		terraform.Init(t, tfOptions)
-		
+
 		// Run plan to check for destructive changes
 		planString := terraform.RunTerraformCommand(t, tfOptions, terraform.FormatArgs(tfOptions, "plan")...)
-		
+
 		// Check for destroy operations in plan output
 		if strings.Contains(planString, "destroy") || strings.Contains(planString, "forces replacement") {
 			t.Logf("Warning: Plan contains destructive changes:\n%s", planString)
 		}
-		
+
 		// Verify plan output is not empty
 		assert.NotEmpty(t, planString, "Plan output should not be empty")
 	})
 
 	// Step 2: Terraform Apply
 	t.Run("Apply", func(t *testing.T) {
-		defer terraform.Destroy(t, tfOptions)
-		
 		terraform.InitAndApply(t, tfOptions)
 	})
 
 	// Step 3: Verify Outputs
 	t.Run("VerifyOutputs", func(t *testing.T) {
-		
+
 		// Get outputs
 		vpcID := terraform.Output(t, tfOptions, "vpc_id")
 		vpcCIDR := terraform.Output(t, tfOptions, "vpc_cidr")
@@ -68,14 +69,14 @@ func TestInfrastructure(t *testing.T) {
 		// Verify VPC outputs
 		require.NotEmpty(t, vpcID, "VPC ID should not be empty")
 		assert.True(t, strings.HasPrefix(vpcID, "vpc-"), "VPC ID should start with 'vpc-'")
-		
+
 		require.NotEmpty(t, vpcCIDR, "VPC CIDR should not be empty")
 		assert.Equal(t, "10.10.0.0/16", vpcCIDR, "VPC CIDR should match expected value")
 
 		// Verify subnet outputs
 		require.Len(t, publicSubnetIDs, 2, "Should have 2 public subnets")
 		require.Len(t, privateSubnetIDs, 2, "Should have 2 private subnets")
-		
+
 		for _, subnetID := range append(publicSubnetIDs, privateSubnetIDs...) {
 			assert.True(t, strings.HasPrefix(subnetID, "subnet-"), "Subnet ID should start with 'subnet-'")
 		}
@@ -84,9 +85,9 @@ func TestInfrastructure(t *testing.T) {
 		require.Contains(t, s3BucketNames, "raw", "Should have raw bucket")
 		require.Contains(t, s3BucketNames, "lake", "Should have lake bucket")
 		require.Contains(t, s3BucketNames, "audit", "Should have audit bucket")
-		
+
 		for bucketType, bucketName := range s3BucketNames {
-			assert.True(t, strings.HasPrefix(bucketName, "claim-dev-"), 
+			assert.True(t, strings.HasPrefix(bucketName, "claim-dev-"),
 				fmt.Sprintf("%s bucket should start with 'claim-dev-'", bucketType))
 		}
 
@@ -94,9 +95,9 @@ func TestInfrastructure(t *testing.T) {
 		require.Contains(t, kmsKeyARNs, "raw", "Should have raw KMS key")
 		require.Contains(t, kmsKeyARNs, "lake", "Should have lake KMS key")
 		require.Contains(t, kmsKeyARNs, "audit", "Should have audit KMS key")
-		
+
 		for keyType, keyARN := range kmsKeyARNs {
-			assert.True(t, strings.HasPrefix(keyARN, "arn:aws:kms:"), 
+			assert.True(t, strings.HasPrefix(keyARN, "arn:aws:kms:"),
 				fmt.Sprintf("%s KMS key should be a valid ARN", keyType))
 		}
 
@@ -104,9 +105,9 @@ func TestInfrastructure(t *testing.T) {
 		require.Contains(t, iamRoleARNs, "ingestion", "Should have ingestion role")
 		require.Contains(t, iamRoleARNs, "etl", "Should have ETL role")
 		require.Contains(t, iamRoleARNs, "analyst", "Should have analyst role")
-		
+
 		for roleType, roleARN := range iamRoleARNs {
-			assert.True(t, strings.HasPrefix(roleARN, "arn:aws:iam:"), 
+			assert.True(t, strings.HasPrefix(roleARN, "arn:aws:iam:"),
 				fmt.Sprintf("%s role should be a valid ARN", roleType))
 		}
 
@@ -121,7 +122,7 @@ func TestInfrastructure(t *testing.T) {
 
 	// Step 4: Verify AWS Resources
 	t.Run("VerifyAWSResources", func(t *testing.T) {
-		
+
 		// Create AWS session
 		sess, err := session.NewSession(&aws.Config{
 			Region: aws.String(region),
@@ -142,11 +143,25 @@ func TestInfrastructure(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, vpcOutput.Vpcs, 1, "VPC should exist")
-		
+
 		vpc := vpcOutput.Vpcs[0]
 		assert.Equal(t, "10.10.0.0/16", *vpc.CidrBlock, "VPC CIDR should match")
-		assert.True(t, *vpc.EnableDnsHostnames, "VPC should have DNS hostnames enabled")
-		assert.True(t, *vpc.EnableDnsSupport, "VPC should have DNS support enabled")
+
+		// Verify DNS hostnames attribute
+		dnsHostnamesOutput, err := ec2Svc.DescribeVpcAttribute(&ec2.DescribeVpcAttributeInput{
+			VpcId:     aws.String(vpcID),
+			Attribute: aws.String("enableDnsHostnames"),
+		})
+		require.NoError(t, err)
+		assert.True(t, *dnsHostnamesOutput.EnableDnsHostnames.Value, "VPC should have DNS hostnames enabled")
+
+		// Verify DNS support attribute
+		dnsSupportOutput, err := ec2Svc.DescribeVpcAttribute(&ec2.DescribeVpcAttributeInput{
+			VpcId:     aws.String(vpcID),
+			Attribute: aws.String("enableDnsSupport"),
+		})
+		require.NoError(t, err)
+		assert.True(t, *dnsSupportOutput.EnableDnsSupport.Value, "VPC should have DNS support enabled")
 
 		// Verify Subnets
 		allSubnetIDs := append(publicSubnetIDs, privateSubnetIDs...)
@@ -155,16 +170,16 @@ func TestInfrastructure(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, subnetOutput.Subnets, 4, "Should have 4 subnets total")
-		
+
 		// Verify public subnets
 		publicSubnetMap := make(map[string]bool)
 		for _, id := range publicSubnetIDs {
 			publicSubnetMap[id] = true
 		}
-		
+
 		for _, subnet := range subnetOutput.Subnets {
 			if publicSubnetMap[*subnet.SubnetId] {
-				assert.True(t, *subnet.MapPublicIpOnLaunch, 
+				assert.True(t, *subnet.MapPublicIpOnLaunch,
 					fmt.Sprintf("Subnet %s should be public", *subnet.SubnetId))
 			}
 		}
@@ -183,9 +198,9 @@ func TestInfrastructure(t *testing.T) {
 				Bucket: aws.String(bucketName),
 			})
 			require.NoError(t, err)
-			require.NotNil(t, versioningOutput.Status, 
+			require.NotNil(t, versioningOutput.Status,
 				fmt.Sprintf("%s bucket should have versioning status", bucketType))
-			assert.Equal(t, "Enabled", *versioningOutput.Status, 
+			assert.Equal(t, "Enabled", *versioningOutput.Status,
 				fmt.Sprintf("%s bucket should have versioning enabled", bucketType))
 
 			// Check encryption
@@ -193,15 +208,15 @@ func TestInfrastructure(t *testing.T) {
 				Bucket: aws.String(bucketName),
 			})
 			require.NoError(t, err)
-			require.NotNil(t, encryptionOutput.ServerSideEncryptionConfiguration, 
+			require.NotNil(t, encryptionOutput.ServerSideEncryptionConfiguration,
 				fmt.Sprintf("%s bucket should have encryption configured", bucketType))
-			require.Len(t, encryptionOutput.ServerSideEncryptionConfiguration.Rules, 1, 
+			require.Len(t, encryptionOutput.ServerSideEncryptionConfiguration.Rules, 1,
 				fmt.Sprintf("%s bucket should have encryption rule", bucketType))
-			
+
 			encryptionRule := encryptionOutput.ServerSideEncryptionConfiguration.Rules[0]
-			require.NotNil(t, encryptionRule.ApplyServerSideEncryptionByDefault, 
+			require.NotNil(t, encryptionRule.ApplyServerSideEncryptionByDefault,
 				fmt.Sprintf("%s bucket should have default encryption", bucketType))
-			assert.Equal(t, "aws:kms", 
+			assert.Equal(t, "aws:kms",
 				*encryptionRule.ApplyServerSideEncryptionByDefault.SSEAlgorithm,
 				fmt.Sprintf("%s bucket should use KMS encryption", bucketType))
 		}
@@ -214,29 +229,29 @@ func TestInfrastructure(t *testing.T) {
 				KeyId: aws.String(keyARN),
 			})
 			require.NoError(t, err, fmt.Sprintf("%s KMS key should exist", keyType))
-			
+
 			key := keyOutput.KeyMetadata
 			assert.True(t, *key.Enabled, fmt.Sprintf("%s KMS key should be enabled", keyType))
-			assert.Equal(t, "ENCRYPT_DECRYPT", *key.KeyUsage, 
+			assert.Equal(t, "ENCRYPT_DECRYPT", *key.KeyUsage,
 				fmt.Sprintf("%s KMS key should be for encryption/decryption", keyType))
 		}
 	})
 
 	// Step 5: Check for Drift
 	t.Run("CheckDrift", func(t *testing.T) {
-		
+
 		// Run terraform plan - after apply, should show no changes
-		planOutput := terraform.RunTerraformCommand(t, tfOptions, 
+		planOutput := terraform.RunTerraformCommand(t, tfOptions,
 			terraform.FormatArgs(tfOptions, "plan")...)
-		
+
 		// After apply, plan should show "No changes"
 		// Check for drift indicators
-		if strings.Contains(planOutput, "No changes") || 
-		   strings.Contains(planOutput, "Your infrastructure matches the configuration") {
+		if strings.Contains(planOutput, "No changes") ||
+			strings.Contains(planOutput, "Your infrastructure matches the configuration") {
 			t.Log("✓ No drift detected - infrastructure matches configuration")
-		} else if strings.Contains(planOutput, "will be created") || 
-		          strings.Contains(planOutput, "will be updated") || 
-		          strings.Contains(planOutput, "will be destroyed") {
+		} else if strings.Contains(planOutput, "will be created") ||
+			strings.Contains(planOutput, "will be updated") ||
+			strings.Contains(planOutput, "will be destroyed") {
 			t.Errorf("Drift detected! Plan shows changes after apply:\n%s", planOutput)
 		} else {
 			// Plan output doesn't clearly indicate changes, log for review
@@ -244,6 +259,5 @@ func TestInfrastructure(t *testing.T) {
 		}
 	})
 
-	// Cleanup is handled by defer in Apply test
+	// Cleanup is handled by defer at the top of TestInfrastructure function
 }
-
