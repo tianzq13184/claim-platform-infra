@@ -45,3 +45,9 @@ variable "tags" {
   default     = {}
 }
 
+variable "force_destroy" {
+  type        = bool
+  description = "Allow deletion of non-empty buckets. Use with caution in production."
+  default     = false
+}
+

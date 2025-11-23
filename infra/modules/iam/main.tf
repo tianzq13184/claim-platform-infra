@@ -152,6 +152,8 @@ locals {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_iam_role" "this" {
   for_each = local.role_definitions
 
@@ -204,6 +206,26 @@ data "aws_iam_policy_document" "assume_role" {
       principals {
         type        = "Service"
         identifiers = ["lambda.amazonaws.com"]
+      }
+    }
+  }
+
+  # For analyst role, if no trusted principals are provided, allow the account root
+  # This ensures the policy always has at least one statement
+  dynamic "statement" {
+    for_each = each.key == "analyst" && length(each.value.trusted) == 0 ? [1] : []
+    content {
+      actions = ["sts:AssumeRole"]
+      effect  = "Allow"
+
+      principals {
+        type        = "AWS"
+        identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      }
+      condition {
+        test     = "StringLike"
+        variable = "aws:PrincipalArn"
+        values   = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/role-claim-*"]
       }
     }
   }

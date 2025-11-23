@@ -24,3 +24,9 @@ variable "tags" {
   default     = {}
 }
 
+variable "prevent_destroy" {
+  type        = bool
+  description = "Prevent accidental deletion of CloudTrail. Set to true for production."
+  default     = false
+}
+

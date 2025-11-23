@@ -20,47 +20,57 @@ data "aws_iam_policy_document" "base" {
     resources = ["*"]
   }
 
-  statement {
-    sid    = "AllowAdmins"
-    effect = "Allow"
-    principals {
-      type        = "AWS"
-      identifiers = var.key_admin_arns
+  # Only add admin statement if admins are provided
+  dynamic "statement" {
+    for_each = length(var.key_admin_arns) > 0 ? [1] : []
+    content {
+      sid    = "AllowAdmins"
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = var.key_admin_arns
+      }
+      actions = [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion"
+      ]
+      resources = ["*"]
     }
-    actions = [
-      "kms:Create*",
-      "kms:Describe*",
-      "kms:Enable*",
-      "kms:List*",
-      "kms:Put*",
-      "kms:Update*",
-      "kms:Revoke*",
-      "kms:Disable*",
-      "kms:Get*",
-      "kms:Delete*",
-      "kms:TagResource",
-      "kms:UntagResource",
-      "kms:ScheduleKeyDeletion",
-      "kms:CancelKeyDeletion"
-    ]
-    resources = ["*"]
   }
 
-  statement {
-    sid    = "AllowUseOfKey"
-    effect = "Allow"
-    principals {
-      type        = "AWS"
-      identifiers = values(var.service_roles)
+  # Only add service role statement if roles are provided
+  # Note: This uses role ARNs that may not exist yet, but AWS will validate them
+  # when the policy is applied. For initial creation, we allow empty service_roles.
+  dynamic "statement" {
+    for_each = length(var.service_roles) > 0 ? [1] : []
+    content {
+      sid    = "AllowUseOfKey"
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = values(var.service_roles)
+      }
+      actions = [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ]
+      resources = ["*"]
     }
-    actions = [
-      "kms:Decrypt",
-      "kms:Encrypt",
-      "kms:ReEncrypt*",
-      "kms:GenerateDataKey*",
-      "kms:DescribeKey"
-    ]
-    resources = ["*"]
   }
 }
 

@@ -45,7 +45,9 @@ module "network" {
 module "kms" {
   source          = "../../modules/kms"
   key_admin_arns  = var.key_admin_arns
-  service_roles   = local.role_arns
+  # Don't pass service_roles here - they don't exist yet
+  # We'll grant permissions after IAM roles are created
+  service_roles   = {}
   tags            = local.tags
 }
 
@@ -67,8 +69,9 @@ module "s3" {
   allowed_vpc_endpoint_ids = [
     module.network.vpc_endpoint_ids.s3
   ]
-  account_id = data.aws_caller_identity.current.account_id
-  tags       = local.tags
+  account_id   = data.aws_caller_identity.current.account_id
+  force_destroy = true  # Allow cleanup in dev/test environments
+  tags         = local.tags
 }
 
 module "cloudtrail" {
@@ -96,5 +99,25 @@ module "iam" {
   redshift_cluster_identifier   = var.redshift_cluster_identifier
   redshift_namespace_arn        = var.redshift_namespace_arn
   tags                         = local.tags
+}
+
+# Grant KMS key permissions to IAM roles after they are created
+resource "aws_kms_grant" "ingestion_raw" {
+  key_id            = module.kms.key_arns.raw
+  grantee_principal = module.iam.role_arns.ingestion
+  operations        = ["Decrypt", "Encrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext"]
+}
+
+resource "aws_kms_grant" "etl_keys" {
+  for_each          = module.kms.key_arns
+  key_id            = each.value
+  grantee_principal = module.iam.role_arns.etl
+  operations         = ["Decrypt", "Encrypt", "ReEncryptFrom", "ReEncryptTo", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext"]
+}
+
+resource "aws_kms_grant" "analyst_lake" {
+  key_id            = module.kms.key_arns.lake
+  grantee_principal = module.iam.role_arns.analyst
+  operations        = ["Decrypt", "DescribeKey"]
 }
 
