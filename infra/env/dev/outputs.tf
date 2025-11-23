@@ -66,3 +66,33 @@ output "tags" {
   value       = local.tags
 }
 
+output "sqs_queue_arn" {
+  description = "ARN of the SQS queue for S3 events"
+  value       = module.sqs.queue_arn
+}
+
+output "sqs_queue_url" {
+  description = "URL of the SQS queue for S3 events"
+  value       = module.sqs.queue_url
+}
+
+output "sqs_dlq_arn" {
+  description = "ARN of the SQS dead letter queue"
+  value       = module.sqs.dlq_arn
+}
+
+output "sqs_dlq_url" {
+  description = "URL of the SQS dead letter queue"
+  value       = module.sqs.dlq_url
+}
+
+output "dynamodb_table_arn" {
+  description = "ARN of the DynamoDB file metadata table"
+  value       = module.dynamodb.table_arn
+}
+
+output "dynamodb_table_name" {
+  description = "Name of the DynamoDB file metadata table"
+  value       = module.dynamodb.table_name
+}
+
