@@ -9,6 +9,12 @@ variable "service_roles" {
   default     = {}
 }
 
+variable "sqs_queue_arns" {
+  description = "List of SQS queue ARNs that need to use this KMS key for encryption. Required when SQS queues use CMK."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Common tags."
   type        = map(string)

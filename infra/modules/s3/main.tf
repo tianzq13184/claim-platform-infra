@@ -5,6 +5,8 @@ locals {
 resource "aws_s3_bucket" "raw" {
   bucket = var.raw_bucket_name
 
+  force_destroy = var.force_destroy
+
   tags = merge(var.tags, {
     Name = var.raw_bucket_name
     Layer = "raw"
@@ -13,6 +15,8 @@ resource "aws_s3_bucket" "raw" {
 
 resource "aws_s3_bucket" "lake" {
   bucket = var.lake_bucket_name
+
+  force_destroy = var.force_destroy
 
   tags = merge(var.tags, {
     Name = var.lake_bucket_name
@@ -290,5 +294,28 @@ resource "aws_s3_bucket_policy" "lake" {
 resource "aws_s3_bucket_policy" "audit" {
   bucket = aws_s3_bucket.audit.id
   policy = data.aws_iam_policy_document.audit.json
+}
+
+# S3 Event Notification for Raw Bucket -> SQS
+# Create notification only if queue ARN is provided (not null)
+# Note: SQS queue policy must allow S3 to send messages before this can be created
+# The queue policy is created in the SQS module and must exist before this notification
+# AWS requires the queue policy to be fully propagated before S3 can validate the destination
+resource "aws_s3_bucket_notification" "raw" {
+  bucket = aws_s3_bucket.raw.id
+
+  dynamic "queue" {
+    for_each = var.raw_bucket_sqs_queue_arn != null ? [1] : []
+    content {
+      queue_arn = var.raw_bucket_sqs_queue_arn
+      events    = ["s3:ObjectCreated:*"]
+    }
+  }
+
+  # Ensure queue policy exists and is propagated before creating notification
+  # This helps avoid "Unable to validate destination configurations" errors
+  # Note: The queue policy must be fully propagated in AWS before S3 can validate the destination
+  # The parent module should use null_resource to wait for policy propagation
+  # depends_on is handled at the module level in the parent configuration
 }
 

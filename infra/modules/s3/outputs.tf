@@ -28,3 +28,8 @@ output "audit_bucket_name" {
   description = "Name of audit bucket."
 }
 
+output "raw_bucket_id" {
+  value       = aws_s3_bucket.raw.id
+  description = "ID of raw bucket (for use in event notifications)."
+}
+

@@ -70,6 +70,7 @@ module "sqs" {
   dlq_name            = "${local.name_prefix}-s3-events-dlq"
   kms_key_id          = module.kms.key_arns.raw
   s3_bucket_arn       = "arn:aws:s3:::${local.name_prefix}-raw"
+  account_id          = data.aws_caller_identity.current.account_id
   message_retention_seconds = 345600  # 4 days
   max_receive_count   = 3
   tags                = local.tags
@@ -86,7 +87,7 @@ module "dynamodb" {
 
 # Wait for SQS queue policy to propagate before creating S3 event notification
 # AWS requires some time for queue policies to propagate across regions
-# Extended to 30 seconds to ensure policy is fully propagated before S3 validation
+# Extended to 60 seconds to ensure policy is fully propagated before S3 validation
 resource "null_resource" "wait_for_sqs_policy" {
   depends_on = [module.sqs.queue_policy_id]
 
@@ -95,7 +96,7 @@ resource "null_resource" "wait_for_sqs_policy" {
   }
 
   provisioner "local-exec" {
-    command = "sleep 30"  # Wait 30 seconds for policy to propagate
+    command = "sleep 60"  # Wait 60 seconds for policy to propagate
   }
 }
 
@@ -117,11 +118,13 @@ module "s3" {
   tags                  = local.tags
   
   # Ensure SQS queue and its policy are created and propagated before configuring notifications
+  # Also ensure KMS key policy is updated to allow SQS service
   # The queue policy must be fully propagated in AWS before S3 can validate the destination
   depends_on = [
     module.sqs,
     module.sqs.queue_policy_id,  # Explicitly wait for queue policy to be created
-    null_resource.wait_for_sqs_policy  # Wait for policy to propagate
+    null_resource.wait_for_sqs_policy,  # Wait for policy to propagate
+    aws_kms_key_policy.raw_with_sqs  # Ensure KMS key policy allows SQS service
   ]
 }
 
@@ -170,5 +173,77 @@ resource "aws_kms_grant" "analyst_lake" {
   key_id            = module.kms.key_arns.lake
   grantee_principal = module.iam.role_arns.analyst
   operations        = ["Decrypt", "DescribeKey"]
+}
+
+# Update KMS key policy to allow SQS service to use the raw key
+# This is required for SQS queues that use CMK encryption
+# We need to update the policy after SQS queues are created because
+# we need the queue ARNs for EncryptionContext conditions
+data "aws_iam_policy_document" "raw_key_with_sqs" {
+  # Start with the base policy from KMS module
+  source_policy_documents = [module.kms.key_policy_json]
+
+  # Add SQS service permission for main queue
+  # This is required for SQS queues that use CMK encryption
+  # The EncryptionContext condition ensures SQS can only use this key for the specific queue
+  # Note: kms:DescribeKey is NOT included here because it does NOT support the
+  # kms:EncryptionContext:aws:sqs:arn condition key, which causes S3→SQS notification validation to fail
+  statement {
+    sid    = "AllowSQSToUseKey-MainQueue"
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["sqs.amazonaws.com"]
+    }
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*"
+    ]
+    resources = ["*"]
+    
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:sqs:arn"
+      values   = [module.sqs.queue_arn]
+    }
+  }
+
+  # Add SQS service permission for DLQ
+  # This is required for SQS DLQ that uses CMK encryption
+  # Note: kms:DescribeKey is NOT included here because it does NOT support the
+  # kms:EncryptionContext:aws:sqs:arn condition key, which causes S3→SQS notification validation to fail
+  statement {
+    sid    = "AllowSQSToUseKey-DLQ"
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["sqs.amazonaws.com"]
+    }
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*"
+    ]
+    resources = ["*"]
+    
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:sqs:arn"
+      values   = [module.sqs.dlq_arn]
+    }
+  }
+}
+
+resource "aws_kms_key_policy" "raw_with_sqs" {
+  key_id = module.kms.key_arns.raw
+  policy = data.aws_iam_policy_document.raw_key_with_sqs.json
+
+  depends_on = [
+    module.sqs,
+    module.kms
+  ]
 }
 

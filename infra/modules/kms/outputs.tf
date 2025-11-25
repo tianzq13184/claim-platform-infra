@@ -8,3 +8,8 @@ output "key_aliases" {
   value       = { for k, res in aws_kms_alias.this : k => res.name }
 }
 
+output "key_policy_json" {
+  description = "The JSON policy document for the KMS keys (for merging with additional policies)"
+  value       = data.aws_iam_policy_document.base.json
+}
+

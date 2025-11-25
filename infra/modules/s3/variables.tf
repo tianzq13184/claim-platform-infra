@@ -51,3 +51,15 @@ variable "force_destroy" {
   default     = false
 }
 
+variable "raw_bucket_sqs_queue_arn" {
+  type        = string
+  description = "ARN of the SQS queue to receive S3 event notifications from raw bucket"
+  default     = null
+}
+
+variable "raw_bucket_sqs_queue_policy_id" {
+  type        = string
+  description = "ID of the SQS queue policy (for dependency management)"
+  default     = null
+}
+

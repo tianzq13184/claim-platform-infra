@@ -20,6 +20,12 @@ data "aws_iam_policy_document" "base" {
     resources = ["*"]
   }
 
+  # Note: SQS service permissions are NOT added here in the base policy
+  # because they require EncryptionContext conditions with specific queue ARNs.
+  # SQS permissions should be added in the environment configuration (e.g., dev/main.tf)
+  # after SQS queues are created, using aws_kms_key_policy resource to merge
+  # the base policy with queue-specific SQS permissions.
+
   # Only add admin statement if admins are provided
   dynamic "statement" {
     for_each = length(var.key_admin_arns) > 0 ? [1] : []
